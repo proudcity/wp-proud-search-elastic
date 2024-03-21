@@ -12,7 +12,7 @@ License:            Affero GPL v3
 
 
 // Elastic Search?
-if ( class_exists( 'EP_Config' ) ) {
+if ( class_exists( 'ElasticPress\Elasticsearch' ) ) {
   require_once( plugin_dir_path(__FILE__) . 'lib/elasticsearch.class.php' );
 }
 
