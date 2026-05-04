@@ -798,7 +798,15 @@ class ProudElasticSearch
 		$filter_index = ! empty($config['form_instance']['filter_index'])
 			&& 'all' !== $config['form_instance']['filter_index'];
 		if ($filter_index) {
-			$query_args['filter_index'] = $config['form_instance']['filter_index'];
+			$fi_val = $config['form_instance']['filter_index'];
+			if (is_string($fi_val)) {
+				// Allowlist: only accept a known cohort key or our own index name.
+				$fi_allowed = ( is_array($this->search_cohort) && array_key_exists($fi_val, $this->search_cohort) )
+					|| $fi_val === $this->index_name;
+				if ($fi_allowed) {
+					$query_args['filter_index'] = $fi_val;
+				}
+			}
 		}
 
 		// error_log('elastic query_args hit 3');
@@ -808,7 +816,7 @@ class ProudElasticSearch
 		if ($teaserIndex && ($teaserIndex === 'all' || ! empty($this->search_cohort[$teaserIndex]))) {
 			// error_log('elastic query_args hit 4');
 			$query_args['filter_index'] = $teaserIndex === 'all'
-				? $this->ep_global_alias_full(true)
+				? 'all'
 				: $config['options']['elastic_index'];
 
 			// Add external categories?
@@ -1223,7 +1231,28 @@ class ProudElasticSearch
 	public function ep_search_request_path($path, $index, $type, $query, $query_args)
 	{
 		if (! empty($query_args['filter_index'])) {
-			$path = $query_args['filter_index'] . '/_doc/_search';
+			$fi = $query_args['filter_index'];
+			if (! is_string($fi)) {
+				return $path;
+			}
+			if ($fi === 'all') {
+				$cohort_keys = is_array($this->search_cohort) ? array_keys($this->search_cohort) : [];
+				$cohort_keys = array_filter(
+					$cohort_keys,
+					function ($k) { return is_string($k) && preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $k); }
+				);
+				if (! empty($cohort_keys)) {
+					$path = implode(',', $cohort_keys) . '/_doc/_search';
+				}
+				return $path;
+			}
+			// Allowlist + shape gate: value must be a known cohort key or our own index,
+			// and must match the safe ES index character set before going into the URL path.
+			$fi_allowed = ( is_array($this->search_cohort) && array_key_exists($fi, $this->search_cohort) )
+				|| $fi === $this->index_name;
+			if ($fi_allowed && preg_match('/^[a-z0-9][a-z0-9_-]{0,63}$/', $fi)) {
+				$path = $fi . '/_doc/_search';
+			}
 		}
 
 		// error_log('elastic ep_search_request_path 1: ' . $path);
