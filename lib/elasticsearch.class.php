@@ -83,6 +83,17 @@ class ProudElasticSearch
 	public $attachments_api;
 
 	/**
+	 * Basic auth credentials for the docs API. Both must be defined as constants
+	 * (EP_HELPER_USER / EP_HELPER_PASS) for the Authorization header to be sent;
+	 * otherwise the plugin behaves as before (no auth header) for back-compat
+	 * during the PCD269 staged rollout.
+	 *
+	 * @var string|false
+	 */
+	public $attachments_auth_user;
+	public $attachments_auth_pass;
+
+	/**
 	 * @var ElasticPress\Feature\Documents\Documents
 	 */
 	public $EPDocuments;
@@ -110,6 +121,9 @@ class ProudElasticSearch
 		// Are we processing attachments?
 		// error_log('is doing attachments: ' . defined( 'EP_HELPER_HOST' ));
 		$this->attachments_api = defined('EP_HELPER_HOST') ? EP_HELPER_HOST : false;
+		// trim() guards against trailing newlines in k8s Secret YAML values.
+		$this->attachments_auth_user = defined('EP_HELPER_USER') ? trim(EP_HELPER_USER) : false;
+		$this->attachments_auth_pass = defined('EP_HELPER_PASS') ? trim(EP_HELPER_PASS) : false;
 
 		// Deal with elastic mapping
 		// -----------------------------------
@@ -455,6 +469,14 @@ class ProudElasticSearch
 			),
 			'body'    => new stdClass(),
 		];
+
+		// PCD269: send Basic auth when both creds are defined. Until the docsapi
+		// side flips routeAuth on (stage 4), this is a no-op on the server.
+		if ($this->attachments_auth_user && $this->attachments_auth_pass) {
+			$args['headers']['Authorization'] = 'Basic ' . base64_encode(
+				$this->attachments_auth_user . ':' . $this->attachments_auth_pass
+			);
+		}
 
 		$args['body']->indexedPath      = $this->indexed_post_path($post_args['ID']);
 		$args['body']->path             = $this->ep_document_request_path($post_args['ID']);
