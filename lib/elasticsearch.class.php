@@ -76,17 +76,25 @@ class ProudElasticSearch
 	public static $aggregations;
 
 	/**
-	 * URL to post to the documents helper api
+	 * URL to post to the documents helper api (no auth).
 	 *
-	 * @var string
+	 * @var string|false
 	 */
 	public $attachments_api;
 
 	/**
-	 * Basic auth credentials for the docs API. Both must be defined as constants
-	 * (EP_HELPER_USER / EP_HELPER_PASS) for the Authorization header to be sent;
-	 * otherwise the plugin behaves as before (no auth header) for back-compat
-	 * during the PCD269 staged rollout.
+	 * URL to post to the auth-required docs helper api. When this is defined
+	 * alongside EP_HELPER_USER/EP_HELPER_PASS, post_to_helper_api routes through
+	 * here with a Basic Auth header. This is the PCD269 per-site cutover knob.
+	 *
+	 * @var string|false
+	 */
+	public $attachments_api_auth;
+
+	/**
+	 * Basic auth credentials for the docs API. Used only when
+	 * $attachments_api_auth is also defined; otherwise the plugin posts to
+	 * $attachments_api without an Authorization header.
 	 *
 	 * @var string|false
 	 */
@@ -121,6 +129,7 @@ class ProudElasticSearch
 		// Are we processing attachments?
 		// error_log('is doing attachments: ' . defined( 'EP_HELPER_HOST' ));
 		$this->attachments_api = defined('EP_HELPER_HOST') ? EP_HELPER_HOST : false;
+		$this->attachments_api_auth = defined('EP_HELPER_AUTH_HOST') ? EP_HELPER_AUTH_HOST : false;
 		// trim() guards against trailing newlines in k8s Secret YAML values.
 		$this->attachments_auth_user = defined('EP_HELPER_USER') ? trim(EP_HELPER_USER) : false;
 		$this->attachments_auth_pass = defined('EP_HELPER_PASS') ? trim(EP_HELPER_PASS) : false;
@@ -470,9 +479,13 @@ class ProudElasticSearch
 			'body'    => new stdClass(),
 		];
 
-		// PCD269: send Basic auth when both creds are defined. Until the docsapi
-		// side flips routeAuth on (stage 4), this is a no-op on the server.
-		if ($this->attachments_auth_user && $this->attachments_auth_pass) {
+		// PCD269 dual-route URL selector: when EP_HELPER_AUTH_HOST is defined
+		// alongside both creds, post to the auth URL with a Basic Auth header.
+		// Otherwise fall through to the original unauthenticated EP_HELPER_HOST
+		// path. Per-site cutover is just toggling EP_HELPER_AUTH_HOST in pod env.
+		$url = $this->attachments_api;
+		if ($this->attachments_api_auth && $this->attachments_auth_user && $this->attachments_auth_pass) {
+			$url = $this->attachments_api_auth;
 			$args['headers']['Authorization'] = 'Basic ' . base64_encode(
 				$this->attachments_auth_user . ':' . $this->attachments_auth_pass
 			);
@@ -487,7 +500,7 @@ class ProudElasticSearch
 		$args['body'] = json_encode($args['body']);
 
 		try {
-			wp_remote_request($this->attachments_api, $args);
+			wp_remote_request($url, $args);
 		} catch (\Exception $e) {
 			error_log('[elasticsearch] Failed sending to elastic docs API: ' . $e->getMessage());
 		}
