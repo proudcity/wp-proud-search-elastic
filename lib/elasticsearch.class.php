@@ -70,6 +70,19 @@ class ProudElasticSearch
 	public $forms = [];
 
 	/**
+	 * Taxonomy each altered form aggregates on, keyed by form_id_base.
+	 *
+	 * form_filled_fields() only receives the form id, but it has to turn slug
+	 * buckets back into term names, and get_term_by('slug') needs the
+	 * taxonomy to do that unambiguously -- "public-works" exists on San Rafael
+	 * as a category, a document_taxonomy term, a staff-member-group and three
+	 * faq-topics (#2720).
+	 *
+	 * @var array<string,string>
+	 */
+	public $form_taxonomies = [];
+
+	/**
 	 * Result counts
 	 * @var array
 	 */
@@ -945,27 +958,55 @@ class ProudElasticSearch
 					if (! empty($query_args['meta_key']) && $query_args['meta_key'] === MEETING_DATE_FIELD) {
 						//$query_args['orderby'] = 'meta.' . MEETING_DATE_FIELD . '.datetime';
 					}
-
 					// Alter category listings?
 					$alter_cats = ! empty($config['taxonomy'])
 						&& ! empty($config['form_id_base']);
 					if ($alter_cats) {
 						// Add to our form alters
 						$this->forms[] = $config['form_id_base'];
+						// form_id_base is TeaserList::_FORM_ID, a shared
+						// constant, so two teaser lists of different post types
+						// on one page register under the same key. Rather than
+						// last-write-wins -- which would rekey one list's
+						// options against the other's taxonomy, and "public-works"
+						// exists in five taxonomies on San Rafael -- record the
+						// conflict as unknown. form_filled_fields() then leaves
+						// those options alone instead of silently mislabelling
+						// them.
+						$form_id = $config['form_id_base'];
+						if (
+							isset($this->form_taxonomies[$form_id])
+							&& $this->form_taxonomies[$form_id] !== $config['taxonomy']
+						) {
+							$this->form_taxonomies[$form_id] = '';
+						} else {
+							$this->form_taxonomies[$form_id] = $config['taxonomy'];
+						}
 						// Should we modify taxonomy query?
 
 						if (! empty($config['form_instance']['filter_categories'])) {
-							$query_args['tax_query'] = [
-								[
-									'taxonomy' => $config['taxonomy'],
-									'field'    => 'name',
-									// convert & -> &amp; as that's how its being stored in elastic
-									'terms'    => array_map(function ($val) {
-										return stripcslashes(htmlentities($val));
-									}, $config['form_instance']['filter_categories']),
-									'operator' => 'IN',
-								]
-							];
+							// Slugs, not names. The facet has emitted names since the
+							// aggregation was added, which forced an htmlentities()
+							// round trip against the encoded names in the index -- get
+							// either half wrong and a subset of categories silently
+							// stops matching (#2720). resolve_taxonomy_filter_slugs()
+							// still accepts the old names and the term IDs the contact
+							// submenu widget builds, so existing links keep working.
+							$slugs = \Proud\SearchElastic\TeaserFilterTerms::resolve_slugs(
+								$config['form_instance']['filter_categories'],
+								$config['taxonomy']
+							);
+
+							if (! empty($slugs)) {
+								$query_args['tax_query'] = [
+									[
+										'taxonomy' => $config['taxonomy'],
+										'field'    => 'slug',
+										'terms'    => $slugs,
+										'operator' => 'IN',
+									]
+								];
+							}
 						}
 						// Add query aggregation
 						$query_args['aggs'] = [
@@ -976,8 +1017,15 @@ class ProudElasticSearch
 							'aggs'       => [
 								'categories' => [
 									'terms' => [
-										'size'  => 100,
-										'field' => 'terms.' . $config['taxonomy'] . '.name.raw',
+										// A terms aggregation returns only the top N
+										// buckets by doc_count and drops the rest, so a
+										// fixed size hides filter options outright once a
+										// site has more terms than that (#2720).
+										'size'  => \Proud\SearchElastic\TeaserFilterTerms::aggregation_size(
+											$config['taxonomy'],
+											$config
+										),
+										'field' => 'terms.' . $config['taxonomy'] . '.slug',
 									],
 								],
 							],
@@ -1442,20 +1490,29 @@ class ProudElasticSearch
 		if (in_array($form_id_base, $this->forms)) {
 			// Taxonomy filters?
 			if (! empty($fields['filter_categories'])) {
+				$taxonomy = $this->form_taxonomies[$form_id_base] ?? '';
 				// We have aggregations
 				if (! empty(self::$aggregations['terms_aggregation']['categories']['buckets'])) {
-					$options = [];
-					foreach (self::$aggregations['terms_aggregation']['categories']['buckets'] as $key => $term) {
-						// convert &amp; -> &
-						$key             = stripcslashes(html_entity_decode($term['key']));
-						$options[$key] = $key . ' (' . $term['doc_count'] . ')';
+					// Buckets are keyed by slug rather than name from #2720 on.
+					// The label is resolved from the term itself, which also
+					// drops buckets left behind by a deleted term instead of
+					// rendering a checkbox that filters to nothing.
+					$options = \Proud\SearchElastic\TeaserFilterTerms::options_from_buckets(
+						self::$aggregations['terms_aggregation']['categories']['buckets'],
+						$taxonomy
+					);
+					if (! empty($options)) {
+						$fields['filter_categories']['#options'] = $options;
 					}
-					$fields['filter_categories']['#options'] = $options;
-				} // Alter tax to use Name
+				} // No aggregation to work from -- make sure the local options
+				// are keyed the same way the aggregation branch keys them.
 				else {
-					foreach ($fields['filter_categories']['#options'] as $key => $term) {
-						$fields['filter_categories']['#options'][$term] = $term;
-						unset($fields['filter_categories']['#options'][$key]);
+					$options = \Proud\SearchElastic\TeaserFilterTerms::options_by_slug(
+						$fields['filter_categories']['#options'],
+						$taxonomy
+					);
+					if (! empty($options)) {
+						$fields['filter_categories']['#options'] = $options;
 					}
 				}
 			}

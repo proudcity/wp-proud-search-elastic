@@ -4,7 +4,7 @@
 Plugin Name:        Proud Search Elastic
 Plugin URI:         http://getproudcity.com
 Description:        ProudCity distribution
-Version:            2026.05.04.1644
+Version:            2026.09.09.1239
 Author:             ProudCity
 Author URI:         http://getproudcity.com
 
@@ -14,6 +14,10 @@ License:            Affero GPL v3
 @author    ProudCity <info@proudcity.com>
 @copyright 2025 ProudCity
  **/
+
+// Term helpers for the teaser filters. No ElasticPress or WordPress dependency
+// at include time, so it loads -- and unit-tests -- standalone.
+include_once plugin_dir_path(__FILE__) . 'lib/teaser-filter-terms.php';
 
 // Elastic Search?
 if (class_exists('ElasticPress\Elasticsearch')) {
