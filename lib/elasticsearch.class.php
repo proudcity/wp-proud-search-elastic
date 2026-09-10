@@ -998,14 +998,31 @@ class ProudElasticSearch
 							);
 
 							if (! empty($slugs)) {
-								$query_args['tax_query'] = [
-									[
-										'taxonomy' => $config['taxonomy'],
-										'field'    => 'slug',
-										'terms'    => $slugs,
-										'operator' => 'IN',
-									]
+								$visitor = [
+									'taxonomy' => $config['taxonomy'],
+									'field'    => 'slug',
+									'terms'    => $slugs,
+									'operator' => 'IN',
 								];
+
+								// AND onto the widget's own restriction rather
+								// than replacing it (#2923, PCD379). TeaserList
+								// puts the admin-configured categories in
+								// tax_query before this filter runs, and
+								// overwriting it let a visitor select a category
+								// the widget excludes and be served it. Core's
+								// process_post() now merges the same way; this
+								// has to match, or the fix would hold with
+								// Elastic off and silently fail with it on --
+								// which is the configuration the bug was
+								// reported against.
+								$query_args['tax_query'] = ! empty($query_args['tax_query'])
+									? [
+										'relation' => 'AND',
+										$query_args['tax_query'],
+										$visitor,
+									]
+									: [$visitor];
 							}
 						}
 						// Add query aggregation
@@ -1500,6 +1517,23 @@ class ProudElasticSearch
 					$options = \Proud\SearchElastic\TeaserFilterTerms::options_from_buckets(
 						self::$aggregations['terms_aggregation']['categories']['buckets'],
 						$taxonomy
+					);
+					// Narrow to what the widget allows rather than replacing it
+					// (#2923). The aggregation runs over the matched documents
+					// with use-filter, and every matched post contributes ALL
+					// of its categories -- so a post in an allowed category
+					// that is also tagged "Homelessness" put a Homelessness
+					// checkbox on a page whose widget excludes it. build_filters()
+					// has already restricted #options to the configured terms
+					// and keys them by slug, the same way the buckets are keyed
+					// from #2720 on, so this is a straight key intersection.
+					//
+					// An empty intersection deliberately leaves #options alone
+					// through the guard below: the fallback is the widget's own
+					// configured list, never the raw buckets.
+					$options = \Proud\SearchElastic\TeaserFilterTerms::narrow_to_allowed(
+						$options,
+						$fields['filter_categories']['#options']
 					);
 					if (! empty($options)) {
 						$fields['filter_categories']['#options'] = $options;

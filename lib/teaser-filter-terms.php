@@ -149,6 +149,45 @@ class TeaserFilterTerms
      * @param string $taxonomy Taxonomy the slugs belong to.
      * @return array<string,string> Slug => escaped "Name (count)" label.
      */
+    /**
+     * Narrow aggregation-derived options to the ones the widget allows.
+     *
+     * The aggregation runs with use-filter, so it is scoped to the matched
+     * documents -- but each matched document carries EVERY category it holds,
+     * not only the ones the widget selected. A post in an allowed category
+     * that is also tagged "Homelessness" therefore put a Homelessness bucket
+     * in the result, and form_filled_fields() used to hand those buckets
+     * straight to #options, replacing the restricted list build_filters()
+     * had already produced (#2923).
+     *
+     * That was not only cosmetic. process_post() replaced the widget's
+     * tax_query with the visitor's selection rather than narrowing it
+     * (PCD379), so the leaked checkbox was live: clicking it returned every
+     * post in that category, including ones the widget existed to exclude.
+     * Both halves are fixed together; this is the half that stops us offering
+     * the choice at all.
+     *
+     * Returning [] when nothing intersects is deliberate. Every caller guards
+     * with `if (! empty($options))`, so an empty return leaves the widget's
+     * own configured list in place. The one thing that must never happen is
+     * falling back to the unrestricted buckets.
+     *
+     * @param array<string,string> $options Slug => label, from the aggregation.
+     * @param array<string,string> $allowed Slug => label, as build_filters() restricted it.
+     * @return array<string,string> The intersection, in aggregation order.
+     */
+    public static function narrow_to_allowed(array $options, $allowed)
+    {
+        // No restriction to apply. build_filters() hands over every category
+        // when the widget selected none, so there is nothing to narrow to and
+        // the aggregation's own list is already correct.
+        if (empty($allowed) || !is_array($allowed)) {
+            return $options;
+        }
+
+        return array_intersect_key($options, $allowed);
+    }
+
     public static function options_from_buckets(array $buckets, $taxonomy)
     {
         if (empty($taxonomy) || !is_string($taxonomy)) {
