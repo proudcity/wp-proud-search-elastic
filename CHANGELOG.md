@@ -4,7 +4,7 @@
 - Stopped `query_alter()` overwriting the widget's `tax_query` with the visitor's selection (#2923, PCD379). It now ANDs the visitor's clause onto the restriction `TeaserList` has already placed there. `wp-proud-core`'s `process_post()` has the matching change; both are required, because with Elastic running this path is what builds the query, so fixing only core would have left the reported configuration broken. Selecting the leaked `Homelessness` returned 57 posts against the mini beta data where 10 are in scope.
 - **Not a #2720 regression, checked deliberately.** `git log -L` over the block shows the replace behaviour predates it; #2720 changed only the keying and the aggregation size. The size is not implicated either — this widget's aggregation returns 22 buckets, far below both the old fixed `size => 100` and the computed size that replaced it. Enabling Elastic exposed a defect that was already there.
 - 8 new tests in `tests/NarrowToAllowedTest.php` built from the real reported page's data; suite 63 tests / 75 assertions, up from 55.
-- **Ships with wp-proud-core 2026.09.10 or later and must not be split from it.**
+- **Ships with wp-proud-core 2026.09.10.1653 or later and must not be split from it.**
 - Elasticsearch is not reachable from a local install, so the aggregation half is covered by unit tests over bucket fixtures and by reconstructing the buckets from the real database. The nested `relation => AND` `tax_query` needs confirming against a live index on mini beta after deploy.
 
 ## 2026.09.09.1239
