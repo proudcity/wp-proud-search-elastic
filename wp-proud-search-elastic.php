@@ -4,7 +4,7 @@
 Plugin Name:        Proud Search Elastic
 Plugin URI:         http://getproudcity.com
 Description:        ProudCity distribution
-Version:            2026.09.09.1239
+Version:            2026.09.10.1655
 Author:             ProudCity
 Author URI:         http://getproudcity.com
 
